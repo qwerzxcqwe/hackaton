@@ -1,10 +1,11 @@
 import jwt
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Depends, HTTPException
+from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from db import User, get_db, init_db
-from fastapi.security import OAuth2PasswordBearer
+import uvicorn
 
 SECRET_KEY = "secretkey"
 ALGORITHM = "HS256"
@@ -39,6 +40,24 @@ def create_token(data: dict, expires_delta: timedelta = None):
         expire = datetime.utcnow() + timedelta(minutes=15)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def verify_token(token: str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return username
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token has expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+
+def get_current_user(token: str = Depends(oauth2_scheme)):
+    username = verify_token(token)
+    return username
 
 
 @app.post("/register/")
@@ -78,6 +97,11 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
     }
 
 
+@app.get("/users/me/")
+def read_users_me(current_user: str = Depends(get_current_user)):
+    return {"username": current_user}
+
+
 @app.post("/refresh/")
 def refresh_token(token: str = Depends(oauth2_scheme)):
     try:
@@ -97,3 +121,6 @@ def refresh_token(token: str = Depends(oauth2_scheme)):
         raise HTTPException(status_code=401, detail="Refresh token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", port=5000, log_level="info")
